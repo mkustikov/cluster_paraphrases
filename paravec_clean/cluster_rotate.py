@@ -49,20 +49,20 @@ def laplacian(A):
 
 
 def evecs(L,nEvecs):
-    '''
+    """
     Calculate eigenvectors, eigenvalues of laplacian L
-    '''
+    """
     u,s,v = np.linalg.svd(L)
     return s[:nEvecs], u[:,:nEvecs]
 
 def cluster_rotate(A, group_num, verbose=False):
-    '''
+    """
     Cluster by rotating eigenvectors to align with the canonical
     coordinate system
     :param A: Affinity matrix
     :param group_num: array of group numbers to test
     :return: (clusts, best_group_index, Quality, Vr)
-    '''
+    """
     # zero diagonal of A if not already
     for i in range(len(A)):
         A[i][i] = 0.0
@@ -93,7 +93,7 @@ def cluster_rotate(A, group_num, verbose=False):
     return clusts, best_group_index, quality, Vr
 
 def evrot(Vcurr, debug=False):
-    ''' Compute the gradient of the eigenvectors alignment quality
+    """ Compute the gradient of the eigenvectors alignment quality
     by gradient descent
 
     Input:
@@ -107,20 +107,20 @@ def evrot(Vcurr, debug=False):
     :param Vcurr:
     :param debug:
     :return: (clusts, Quality, Vr)
-    '''
+    """
     if debug:
-        print 'Finding optimal rotation for V'
+        print('Finding optimal rotation for V')
 
     # get number and length of eigenvectors dimensions
     X = deepcopy(Vcurr)
     ndata, dim = X.shape
-    print 'Got %d vectors of length %d' % (dim, ndata)
+    print('Got %d vectors of length %d' % (dim, ndata))
 
     # get number of angles
     angle_num = (dim*(dim-1)/2)
     theta = np.zeros(angle_num)
     if debug:
-        print 'Angle number is %d' % angle_num
+        print('Angle number is %d' % angle_num)
 
     # build index mapping
     ik = [0] * angle_num
@@ -132,9 +132,9 @@ def evrot(Vcurr, debug=False):
             jk[k] = j
             k += 1
     if debug:
-        print 'Built index mapping for %d angles' % len(jk)
-        print 'ik:', ik
-        print 'jk:', jk
+        print('Built index mapping for %d angles' % len(jk))
+        print('ik:', ik)
+        print('jk:', jk)
 
     # definitions
     max_iter = 200
@@ -142,7 +142,7 @@ def evrot(Vcurr, debug=False):
 
     Q = evqual(X, dim, ndata)
     if debug:
-        print 'Q = ', Q
+        print('Q = ', Q)
 
     Q_old1 = Q
     Q_old2 = Q
@@ -154,7 +154,7 @@ def evrot(Vcurr, debug=False):
         for d in range(angle_num):
             dQ = evqualitygrad(X, theta, ik, jk, angle_num, d, dim, ndata)
             if debug:
-                print 'gradient =', dQ
+                print('gradient =', dQ)
             theta_new[d] = theta[d] - alpha * dQ
             Xrot = rotate_givens(X, theta_new, ik, jk, angle_num, dim)
             Q_new = evqual(Xrot, dim, ndata)
@@ -163,13 +163,13 @@ def evrot(Vcurr, debug=False):
                 Q = Q_new
             else:
                 theta_new[d] = theta[d]
-        if iter > 2:
+        if itr > 2:
             if Q - Q_old2 < .001:
                 break
         Q_old2 = Q_old1
         Q_old1 = Q
 
-    print 'Done after %d iterations, Quality is %0.4f' % (itr, Q)
+    print('Done after %d iterations, Quality is %0.4f' % (itr, Q))
 
     Xrot = rotate_givens(X, theta_new, ik, jk, angle_num, dim)
     clusts = cluster_assign(Xrot, dim)
@@ -179,7 +179,7 @@ def evrot(Vcurr, debug=False):
 
 
 def evqual(X, dim, ndata):
-    ''' Evaluate alignment quality '''
+    """ Evaluate alignment quality """
     # take the square of all entries and find max of each row
     max_values = [max(r*r) for r in X]
 
@@ -190,7 +190,7 @@ def evqual(X, dim, ndata):
 
 
 def evqualitygrad(X, theta, ik, jk, angle_num, angle_index, dim, ndata):
-    ''' Quality gradient '''
+    """ Quality gradient """
 
     # build V, U, A
     V = gradU(theta, angle_index, ik, jk, dim)
@@ -240,7 +240,7 @@ def cluster_assign(Xrot, dim):
     return cluster_cell_array
 
 def build_Uab(theta, a, b, ik, jk, dim):
-    ''' Give rotation for angles a to b '''
+    """ Give rotation for angles a to b """
     # print 'ik:', ik
     # print 'jk:', jk
     Uab = np.eye(dim)
@@ -259,7 +259,7 @@ def build_Uab(theta, a, b, ik, jk, dim):
 
 
 def gradU(theta, k, ik, jk, dim):
-    ''' Gradient of a single Givens rotation '''
+    """ Gradient of a single Givens rotation """
     V = np.zeros([dim,dim])
 
     V[ik[k]][ik[k]] = -math.sin(theta[k])
@@ -271,5 +271,5 @@ def gradU(theta, k, ik, jk, dim):
 
 
 def buildA(X, U1, Vk, U2):
-    ''' X * U1 * Vk * U2 '''
+    """ X * U1 * Vk * U2 """
     return np.dot(X, np.dot(U1, np.dot(Vk, U2)))

@@ -1,36 +1,36 @@
 ## Anne Cocos, 2015
-
 # Implementation of Hierarchical Graph Factorization Clustering
-## 1. Kai Yu, Shipeng Yu, and Volker Tresp. Soft clustering on graphs. NIPS 18:1553,2006.
-## 2. Lin Sun and Anna Korhonen. Hierarchical Verb Clustering using Graph Factorization. EMNLP 2011:1023-1033.
+# 1. Kai Yu, Shipeng Yu, and Volker Tresp. Soft clustering on graphs. NIPS 18:1553,2006.
+# 2. Lin Sun and Anna Korhonen. Hierarchical Verb Clustering using Graph Factorization. EMNLP 2011:1023-1033.
 
 import numpy as np
 from sklearn.metrics import silhouette_score
 import networkx as nx
 
+
 def gfact(W, m):
-    '''
+    """
     Factorize W to obtain bipartite graph K with adjacency matrix B
     :param W: similarity matrix (n x n)
     :param m: number of clusters
     :return: adjacency matrix B (n x m), vector L (length m)
-    '''
+    """
     n = W.shape[0]
-    H = np.random.rand(n,m) + 1.
+    H = np.random.rand(n, m) + 1.
     # H = H / H.sum(axis=0)[np.newaxis,:]  # normalize cols = 1
     L = np.diag(H.sum(axis=0))
 
     for i in range(50):
         denom = H.dot(L).dot(H.T)
-        W_ = W/denom
+        W_ = W / denom
         W_[np.isinf(W_)] = 1.0  # 0/0=1
         W_[np.isnan(W_)] = 0.0
 
         H_ = H * W_.dot(H).dot(L)
         # H_ = H * (W_*(1-e)).dot(H).dot(L)
-        H_ /= H_.sum(axis=0)[np.newaxis,:]  # normalize cols = 1
+        H_ /= H_.sum(axis=0)[np.newaxis, :]  # normalize cols = 1
         L_ = L * H.T.dot(W_).dot(H)
-        L_ = L_ / (sum(sum(L_))/sum(sum(W)))
+        L_ = L_ / (sum(sum(L_)) / sum(sum(W)))
 
         H = H_
         L = L_
@@ -47,17 +47,17 @@ def gfact(W, m):
 
 
 def hgfc(W, m=None, thresh=0.01):
-    '''
+    """
     Perform Hierarchical Graph Factorization Clustering
     If m is not given, will continue until the number of non-zero
     elements in L is 1
     :param W: adjacency matrix
     :param m: number of clusters to find in first round
     :return: Final round B, list of Bs for each level, and list of cluster numbers (Ms)
-    '''
+    """
     n = W.shape[0]
     if m is None:
-        Ms = [n-1]
+        Ms = [n - 1]
     else:
         Ms = [m]
 
@@ -72,7 +72,7 @@ def hgfc(W, m=None, thresh=0.01):
         B, L = gfact(W, Ms[-1])  # factorize G_{l-1} to obtain bitartite graph K with adjacency matrix B_l
         Bs.append(B)
 
-        D = np.diag(np.sum(B,axis=1))
+        D = np.diag(np.sum(B, axis=1))
 
         Di = np.linalg.inv(D)
 
@@ -81,42 +81,43 @@ def hgfc(W, m=None, thresh=0.01):
         else:
             t = Ts[-1].dot(Di).dot(B)
         Ts.append(t)
-        tmax = np.max(t,axis=1)
-        a = t-tmax[:,np.newaxis] >= - thresh*tmax[:,np.newaxis]
+        tmax = np.max(t, axis=1)
+        a = t - tmax[:, np.newaxis] >= - thresh * tmax[:, np.newaxis]
 
         As.append(a)
 
         W = B.T.dot(Di).dot(B)  # build a graph G_l with similarity matrix W_l = B_l.T * D_l^-1 * B_l
 
-        if (cluscnt == n):
+        if cluscnt == n:
             B_ = B
         else:
             B_ = B_.dot(Di).dot(B)
         cluscnt = sum(a.sum(axis=0) > 0)  # number of clusters with non-empty assignments
         if cluscnt > 1:
-            Ms.append(cluscnt-1)
+            Ms.append(cluscnt - 1)
 
     return B_, Bs, Ms, Ts, As
 
 
 def labeldict(a, wordlist):
-    return {i: [w for w,b in zip(wordlist, a[:,i]) if b] for i in range(a.shape[1])}
+    return {i: [w for w, b in zip(wordlist, a[:, i]) if b] for i in range(a.shape[1])}
+
 
 def labels(a):
     return np.array([np.argmax(row) for row in a])
 
-def h_cluster(wordlist, sims, distmat, thresh=0.01):
 
+def h_cluster(wordlist, sims, distmat, thresh=0.01):
     B_, Bs, Ms, Ts, As = hgfc(sims, thresh=thresh)
 
     sil_coefs = []
-    for i,a in enumerate(As):
+    for i, a in enumerate(As):
         l = labels(a)
-        if len(set(l)) > 2 and len(set(l)) < len(wordlist)-1:
+        if 2 < len(set(l)) < len(wordlist) - 1:
             sil_coefs.append(silhouette_score(distmat, labels(a), metric='precomputed'))
         else:
             sil_coefs.append(0.0)
-    ld = [labeldict(a,wordlist) for a in As]
+    ld = [labeldict(a, wordlist) for a in As]
     return ld, sil_coefs
 
 
@@ -128,17 +129,17 @@ def h_cluster_tree(wordlist, sims, thresh=0.01):
 
     # Add leaf nodes
     for i, w in enumerate(wordlist):
-        T.add_node('0.%d'%i, mem=[w])
+        T.add_node('0.%d' % i, mem=[w])
 
     for l, a in enumerate(Bs):
         for j in range(a.shape[1]):
-            newnode = '%d.%d'%(l+1,j)
+            newnode = '%d.%d' % (l + 1, j)
             T.add_node(newnode)
             newmems = set([])
             for i in range(a.shape[0]):
                 maxprob = np.max(a[i])
-                if np.abs(a[i][j]-maxprob) <= 0.05*maxprob:
-                    fromnode = '%d.%d'%(l,i)
+                if np.abs(a[i][j] - maxprob) <= 0.05 * maxprob:
+                    fromnode = '%d.%d' % (l, i)
                     T.add_edge(fromnode, newnode, mem=[])
                     newmems |= set(T.node[fromnode]['mem'])
             T.node[newnode]['mem'] = list(newmems)

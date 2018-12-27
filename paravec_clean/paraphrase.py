@@ -7,7 +7,7 @@ from sklearn.cluster import SpectralClustering
 from sklearn import preprocessing
 from scipy.spatial.distance import cosine
 import networkx as nx
-import cPickle as pickle
+import pickle as pickle
 import cluster_rotate as cr
 import hgfc
 import entropy
@@ -15,8 +15,8 @@ import sem_clust
 from nltk.stem.lancaster import LancasterStemmer
 from sklearn.metrics import silhouette_score
 
-
 word_type = namedtuple("word_type", "word, type")
+
 
 class Paraphrase:
     def __init__(self, wt):
@@ -43,15 +43,16 @@ class Paraphrase:
     def jdefault(self):
         return self.__dict__
 
+
 class ParaphraseSet:
     def __init__(self, tgt_wt, pp_dict):
-        '''
+        """
         Initialize ParaphraseSet from target word_type and a dictionary of
         Paraphrase objects, where the key is the Paraphrase.word and value is
         Paraphrase object
         :param tgt_wt: word_type
         :param pp_dict: {word -> Paraphrase}
-        '''
+        """
         self.target_word = tgt_wt.word
         self.pos = tgt_wt.type
         self.word_type = tgt_wt
@@ -61,7 +62,7 @@ class ParaphraseSet:
         self.own_vector = []
 
     def zmp_cluster(self, w2p, entail_scores=None):
-        '''
+        """
         Perform unsupervised spectral clustering with local scaling
 
         Uses PPDB2.0Score directly to calculate similarities, and uses
@@ -72,7 +73,7 @@ class ParaphraseSet:
         :param: w2p - 2-layer dict of {word -> word -> score}
         :param: entail_scores - 2-layer dict of {word -> word -> score}
         :return: (updated sense clustering)
-        '''
+        """
         self.reset_sense_clustering()
         wordlist = sorted(self.pp_dict.keys())
         oov = [w for w in wordlist if w not in w2p]
@@ -80,7 +81,7 @@ class ParaphraseSet:
             sys.stderr.write('WARNING: Paraphrases %s are OOV. Removing from ppset.\n' % str(oov))
             wordlist = list(set(wordlist) - set(oov))
 
-        ## Consolidate same-stem paraphrases, and check whether result has 2 or less terms
+        # Consolidate same-stem paraphrases, and check whether result has 2 or less terms
         wordlist_map = self.consolidate_stemmed_wordlist(wordlist, w2p)
         consol_wordlist = sorted(wordlist_map.keys())
         labeldict = self.check_tooeasy(consol_wordlist, w2p)
@@ -95,7 +96,8 @@ class ParaphraseSet:
             sims = get_sims_matrix('direct', w2p, consol_wordlist)
 
             ## Step 1b. Check for singletons
-            singind = [i for i,row in enumerate(sims*(1-np.identity(len(consol_wordlist)))) if np.linalg.norm(row,0)==0]
+            singind = [i for i, row in enumerate(sims * (1 - np.identity(len(consol_wordlist)))) if
+                       np.linalg.norm(row, 0) == 0]
             if len(singind) > 0:
                 singletons |= set([consol_wordlist[i] for i in singind])
                 consol_wordlist = sorted(list(set(consol_wordlist) - set(singletons)))
@@ -104,23 +106,24 @@ class ParaphraseSet:
                 if len(labeldict) > 0:  # if removing singletons gets wordlist down to size 2 or less
                     done = True
                 if len(sims) == 0:
-                    labeldict = {r: [w] for r,w in enumerate(singletons)}
+                    labeldict = {r: [w] for r, w in enumerate(singletons)}
                     done = True
 
             if not done:
                 ## Step 2: Compute sils matrix using distributional similarity of word2vec vectors
                 wlst, x = self.vec_matrix()
-                distrib_sims = dict(zip(wlst,x))
+                distrib_sims = dict(zip(wlst, x))
                 sils = get_sils_matrix('vec_cosine', distrib_sims, consol_wordlist)
 
                 ## Step 3: Incorporate entailments
                 if entail_scores is not None:
-                    entailments = np.array([[1-entail_scores.get(i,{}).get(j,1.0) for j in consol_wordlist] for i in consol_wordlist])
+                    entailments = np.array(
+                        [[1 - entail_scores.get(i, {}).get(j, 1.0) for j in consol_wordlist] for i in consol_wordlist])
                     sims *= entailments
 
                 ## Step 4: Compute Laplacian
                 sigmas = cr.local_scaling_sims(sims)
-                A = cr.affinities_sims(sims,sigmas)
+                A = cr.affinities_sims(sims, sigmas)
                 L = cr.laplacian(A)
 
                 ## Step 5: Determine range of clustering sizes (k) to try
@@ -131,24 +134,26 @@ class ParaphraseSet:
                 while len(group_num) == 0:
                     thresh += 0.01
                     if thresh >= 1.0:
-                        group_num = range(2,min(20, len(consol_wordlist)))
-                        sys.stderr.write("ERROR: Cannot find acceptable number of clusters to try. Defaulting to [2,%d]\n" % max(group_num))
+                        group_num = range(2, min(20, len(consol_wordlist)))
+                        sys.stderr.write(
+                            "ERROR: Cannot find acceptable number of clusters to try. Defaulting to [2,%d]\n" % max(
+                                group_num))
                         break
                     minC = max(2, len([e for e in evals if e > thresh]))
                     group_num = range(minC, min(maxC, len(consol_wordlist)))
 
-
-                ## Step 6: Cluster for each size k in range, and choose best one
+                # Step 6: Cluster for each size k in range, and choose best one
                 clusterings = []
                 scores = []
                 for k in group_num:
                     sc = SpectralClustering(n_clusters=k, affinity='precomputed')
                     sc.fit(L)
                     labels = sc.fit_predict(L)
-                    ld = {l: [pp for (ll,pp) in zip(labels, consol_wordlist) if ll==l]
+                    ld = {l: [pp for (ll, pp) in zip(labels, consol_wordlist) if ll == l]
                           for l in set(labels)}
                     clusterings.append(ld)
-                    if len(set(labels)) > 2 and len(set(labels)) < len(consol_wordlist)-1:  ## TODO: Fix this arbitrary size limit imposed by silhouette_score
+                    if 2 < len(set(labels)) < len(
+                            consol_wordlist) - 1:  # TODO: Fix this arbitrary size limit imposed by silhouette_score
                         scores.append(silhouette_score(sils, labels, metric='precomputed'))
                     else:
                         scores.append(0.0)
@@ -156,13 +161,12 @@ class ParaphraseSet:
 
         sol = self.expand_solution(labeldict, wordlist_map, singletons)
 
-        for k, lst in sol.iteritems():
+        for k, lst in sol.items():
             if len(lst) > 0:
                 self.add_sense_cluster(lst)
 
-
     def hgfc_cluster(self, w2p, entail_scores=None):
-        '''
+        """
         Perform Hierarchical Graph Factorization Clustering (HGFC):
 
         Kai Yu, Shipeng Yu, and Volker Tresp. Soft clustering on graphs. NIPS 18:1553,2006.
@@ -172,7 +176,8 @@ class ParaphraseSet:
 
         :param: w2p - dict of word -> paraphrase dict {str -> {str -> float}}
         :return: (updated sense clustering)
-        '''
+        """
+        # print('here')
         self.reset_sense_clustering()
         wordlist = sorted(self.pp_dict.keys())
         oov = [w for w in wordlist if w not in w2p]
@@ -180,39 +185,53 @@ class ParaphraseSet:
             sys.stderr.write('WARNING: Paraphrases %s are OOV. Removing from ppset.\n' % str(oov))
             wordlist = list(set(wordlist) - set(oov))
 
-        ## Consolidate same-stem paraphrases, and check whether result has 2 or less terms
+        # print('wordlist', wordlist)
+        # Consolidate same-stem paraphrases, and check whether result has 2 or less terms
         wordlist_map = self.consolidate_stemmed_wordlist(wordlist, w2p)
+
+        # print('wordlist_map', wordlist_map)
         consol_wordlist = sorted(wordlist_map.keys())
+        # print('consol_wordlist', consol_wordlist)
         labeldict = self.check_tooeasy(consol_wordlist, w2p)
+
         singletons = set([])
 
-        ## If not, use HGFC
+        # If not, use HGFC
         clusterings = labeldict
+        # print(len(labeldict), labeldict)
+        # print('before if')
         if len(labeldict) == 0:
+            # print('after if')
 
-            ## Step 1: Form similarities matrix using w2vec cosine similarity
-            wlst,x = self.vec_matrix()
-            distrib_sims = dict(zip(wlst,x))
+            # Step 1: Form similarities matrix using w2vec cosine similarity
+            wlst, x = self.vec_matrix()
+            distrib_sims = dict(zip(wlst, x))
             sims = get_sims_matrix('vec_cosine', distrib_sims, consol_wordlist)
+            # print('sims', sims)
 
-            ## Step 2: Compute sils matrix using PPDB2.0Score
+            # Step 2: Compute sils matrix using PPDB2.0Score
+            # print('in step 2')
             sils = get_sils_matrix('direct', w2p, consol_wordlist)
+            # print('sils', sils)
 
-            ## Step 3: Incorporate entailments
+            # Step 3: Incorporate entailments
             if entail_scores is not None:
-                entailments = np.array([[1-entail_scores.get(i,{}).get(j,1.0)
+                # print('in step 3')
+                entailments = np.array([[1 - entail_scores.get(i, {}).get(j, 1.0)
                                          for j in consol_wordlist]
                                         for i in consol_wordlist])
                 sims *= entailments
 
-            ## Step 4: Normalize sims matrix
+            # Step 4: Normalize sims matrix
             sims = preprocessing.normalize(np.matrix(sims), norm='l2')
+            # print('sims', sims)
 
-            ## Step 4: Run HGFC Clustering
+            # Step 5: Run HGFC Clustering
             maxsc = -1.
             iter = 0
             scores = None
             while maxsc <= 0.:
+
                 try:
                     clusterings, scores = hgfc.h_cluster(wordlist, sims, sils)
                     maxsc = max(scores)
@@ -220,21 +239,25 @@ class ParaphraseSet:
                     if iter >= 10:
                         break
                 except KeyError:
+                    print('key error')
                     continue
 
+            print(iter)
+
             labeldict = clusterings[np.argmax(scores)]
+            # print(labeldict)
 
         sol = self.expand_solution(labeldict, wordlist_map, singletons)
 
-        for k, lst in sol.iteritems():
+        for k, lst in sol.items():
             if len(lst) > 0:
                 self.add_sense_cluster(lst)
 
+        # print(clusterings)
         return clusterings
 
-
     def sem_clust(self, w2p, simsdict):
-        ''' Baseline SEMCLUST method (dynamic thresholding), based on:
+        """ Baseline SEMCLUST method (dynamic thresholding), based on:
 
         Marianna Apidianaki, Emilia Verzeni, and Diana McCarthy. Semantic
         Clustering of Pivot Paraphrases. In LREC 2014.
@@ -245,7 +268,7 @@ class ParaphraseSet:
         :param w2p: word -> {paraphrase: score} dictionary, used to decide which nodes to connect with edges
         :param simsdict: word -> {paraphrase: score} OR word -> vector, used for edge weights
         :return:
-        '''
+        """
         self.reset_sense_clustering()
         wordlist = self.pp_dict.keys()
 
@@ -260,11 +283,11 @@ class ParaphraseSet:
             return
 
         # Using cosine similarity of word-paraphrase vectors:
-        if type(simsdict.values()[0]) != dict:
-            similarities = np.array([[1-cosine(simsdict[i], simsdict[j])
+        if type(list(simsdict.values())[0]) != dict:
+            similarities = np.array([[1 - cosine(simsdict[i], simsdict[j])
                                       for j in wordlist] for i in wordlist])
         else:
-            similarities = np.array([[(1-dict_cosine_dist(simsdict[i], simsdict[j]))
+            similarities = np.array([[(1 - dict_cosine_dist(simsdict[i], simsdict[j]))
                                       for j in wordlist] for i in wordlist])
 
         gr = sem_clust.toGraph(similarities, wordlist, self.target_word, w2p)
@@ -277,18 +300,18 @@ class ParaphraseSet:
         self.cluster_count = 0
 
     def add_sense_cluster(self, clus):
-        '''
+        """
         Add sense cluster to dictionary of
         {int -> set}
         where int indicates the cluster number and the set contains strings
         :clus: list of strings
         :return:
-        '''
+        """
         self.cluster_count += 1
         self.sense_clustering[self.cluster_count] = set(clus)
 
     def load_vecs(self, vec_dict):
-        '''
+        """
         Load paraphrase vectors for all paraphrases in vec_dict and the target
         word
 
@@ -297,15 +320,15 @@ class ParaphraseSet:
         2) Americanize and take the American version
         :param vec_dict: {word -> np.array}
         :return:
-        '''
+        """
         veckeys = set(vec_dict.keys())
-        for p in self.pp_dict.itervalues():
+        for p in self.pp_dict.values():
             try:
                 p.load_vec(vec_dict[p.word])
             except KeyError:
                 # Check to see whether pieces of the composition are in the dict
                 pieces = flatten([ww.split('-') for ww in p.word.split('_')])
-                v = np.zeros(vec_dict.values()[0].shape[0])
+                v = np.zeros(list(vec_dict.values())[0].shape[0])
                 n = 0
                 for wrd in pieces:
                     if wrd in veckeys:
@@ -315,7 +338,7 @@ class ParaphraseSet:
                         proxy = try_americanize(wrd, veckeys)
                         v += vec_dict[proxy]
                         n += 1
-                    elif len(wrd) > 1 and wrd[-1]=='s' and wrd[:-1] in veckeys:
+                    elif len(wrd) > 1 and wrd[-1] == 's' and wrd[:-1] in veckeys:
                         proxy = wrd[:-1]
                         v += vec_dict[proxy]
                         n += 1
@@ -339,7 +362,7 @@ class ParaphraseSet:
                     proxy = try_americanize(wrd, veckeys)
                     v += vec_dict[proxy]
                     n += 1
-                elif len(wrd) > 1 and wrd[-1]=='s' and wrd[:-1] in veckeys:
+                elif len(wrd) > 1 and wrd[-1] == 's' and wrd[:-1] in veckeys:
                     proxy = wrd[:-1]
                     v += vec_dict[proxy]
                     n += 1
@@ -348,25 +371,23 @@ class ParaphraseSet:
             v /= max(n, 1.0)
             self.own_vector = v
 
-
-
     def vec_matrix(self):
-        '''
+        """
         Return a matrix of vectors for all paraphrases in this set and a list
         that gives the words corresponding to each row
         :return: list, np.array (len(ppdict) x len(vector))
-        '''
-        zippedlist = [(w, p.vector) for w,p in self.pp_dict.items()]
+        """
+        zippedlist = [(w, p.vector) for w, p in self.pp_dict.items()]
         words, vecs = zip(*zippedlist)
         return words, np.array(vecs)
 
     def sparse_vec_matrix(self, include_self=True):
-        '''
+        """
         Returns a sparse matrix of sparse vectors for all paraphrases in this
         set and a list that gives the words corresponding to each row
         :return: list, np.csr_matrix (len(ppdict) x len(vector))
-        '''
-        zippedlist = [(w, p.vector) for w,p in self.pp_dict.items() if len(p.vector.shape) > 1]
+        """
+        zippedlist = [(w, p.vector) for w, p in self.pp_dict.items() if len(p.vector.shape) > 1]
         if include_self:
             zippedlist.append((self.target_word, self.own_vector))
         words, vecs = zip(*zippedlist)
@@ -379,9 +400,9 @@ class ParaphraseSet:
         return outline.strip()
 
     def filter_ppset_by_gold(self, goldfile):
-        '''
+        """
         Filter paraphrase sets in ppdict to include only words that appear in gold classes
-        '''
+        """
         pp_sets = deepcopy(self.pp_dict)
         try:
             goldsoln = read_gold(goldfile)[self.word_type]  # ParaphraseSet object
@@ -396,62 +417,61 @@ class ParaphraseSet:
         self.pp_dict = pp_sets
 
     def filter_sense_clustering(self, otherppset):
-        '''
+        """
         Filter sense clustering to include only terms that appear as
         paraphrases of otherppset
-        '''
+        """
         if type(otherppset) == set:  # can pass just a set instead
             filtered = otherppset
         else:
             filtered = set([w.word for w in otherppset.get_paraphrase_wtypes()])
         self.sense_clustering = \
-            {num: (clus & filtered) for num, clus in self.sense_clustering.iteritems()}
-        self.sense_clustering = {k: v for k,v in self.sense_clustering.iteritems() if len(v) > 0}
+            {num: (clus & filtered) for num, clus in self.sense_clustering.items()}
+        self.sense_clustering = {k: v for k, v in self.sense_clustering.items() if len(v) > 0}
         self.cluster_count = len(self.sense_clustering)
 
     def check_tooeasy(self, wordlist, w2p):
-        '''
+        """
         Check if Paraphrase Set has only one or two elements, and
         cluster those simply if so.
         :return:
-        '''
+        """
         labeldict = {}
         if len(wordlist) == 1:
             labeldict = {1: wordlist}
         elif len(wordlist) == 2:
-            w1,w2 = wordlist
-            if w2p[w1].get(w2,None) is not None:
+            w1, w2 = wordlist
+            if w2p[w1].get(w2, None) is not None:
                 labeldict = {1: wordlist}
             else:
                 labeldict = {1: [w1], 2: [w2]}
         return labeldict
 
     def consolidate_stemmed_wordlist(self, wl, w2p):
-        '''
+        """
         Consolidates wordlist into its unique stemmed terms.
         For each set of terms with same stem, assign to term with largest number
         of paraphrases
         :param wl: list of str
         :return: {str -> [str,str...]}
-        '''
+        """
         st = LancasterStemmer()
-        stems = [st.stem(w.decode('utf8')).encode('utf8') for w in wl]
-        groups = {s: [ww for ss,ww in zip(stems,wl) if ss==s] for s in set(stems)}
+        stems = [st.stem(w) for w in wl]
+        groups = {s: [ww for ss, ww in zip(stems, wl) if ss == s] for s in set(stems)}
 
         # assign each stem to term with most paraphrases
-        map = {s: lst[np.argmax([len(w2p.get(w,[])) for w in lst])] for s,lst in groups.iteritems()}
-        return {map[s]: lst for s,lst in groups.iteritems()}
-
+        map = {s: lst[np.argmax([len(w2p.get(w, [])) for w in lst])] for s, lst in groups.items()}
+        return {map[s]: lst for s, lst in groups.items()}
 
     def expand_solution(self, ld, cwl, sings):
-        '''
+        """
         Expand a dictionary of solution labels using the consolidated wordlist dict,
         and add singletons back in
         :param ld: dict {int -> [word, word, ...]}
         :param cwl: {word -> [word, word, ...]}
         :param sings: set
         :return: dict {int -> [word, word, word, word...]}
-        '''
+        """
         eld = {}
         maxind = max(ld.keys())
         # add singletons back in
@@ -460,7 +480,7 @@ class ParaphraseSet:
                 maxind += 1
                 ld[maxind] = [s]
         # expand consolidated (shared stem)
-        for i, lst in ld.iteritems():
+        for i, lst in ld.items():
             wrdset = set(lst)
             wrdsetcopy = set(lst)
             for w in wrdsetcopy:
@@ -470,13 +490,14 @@ class ParaphraseSet:
         return eld
 
     def get_paraphrase_wtypes(self):
-        return [p.word_type for p in self.pp_dict.itervalues()]
+        return [p.word_type for p in self.pp_dict.values()]
 
     def jdefault(self):
         return self.__dict__
 
+
 def read_gold(infile):
-    '''
+    """
     Read gold standard clustering solution from infile
 
     Gold file should be in the following format:
@@ -492,7 +513,7 @@ def read_gold(infile):
     :param infile:
     :return: dict (word_type -> {class -> set})
     :return: dict of {word_type -> ParaphraseSet}
-    '''
+    """
     classes = {}
 
     for line in open(infile, 'rU'):
@@ -502,16 +523,17 @@ def read_gold(infile):
             if wtype not in classes:
                 classes[wtype] = ParaphraseSet(wtype, {})
                 classes[wtype].cluster_count = 0
-            poss_class = set([w for w in entry[1].split() if len(w)>0])
+            poss_class = set([w for w in entry[1].split() if len(w) > 0])
             if len(poss_class) > 0:
                 classes[wtype].add_sense_cluster(poss_class)
     for wtype in classes:
-        ppset = set().union(*[s for c,s in classes[wtype].sense_clustering.iteritems()])
+        ppset = set().union(*[s for c, s in classes[wtype].sense_clustering.items()])
         classes[wtype].pp_dict = {w: Paraphrase(word_type(w, wtype.type)) for w in ppset}
     return classes
 
+
 def read_pps(infile):
-    '''
+    """
     Read paraphrase lists from infile.
 
     Infile should be in format:
@@ -523,7 +545,7 @@ def read_pps(infile):
 
     :param infile: str
     :return: dict {word_type -> ParaphraseSet}
-    '''
+    """
     ppsets = {}
     with open(infile, 'rU') as fin:
         for line in fin:
@@ -538,13 +560,13 @@ def read_pps(infile):
 
 
 def load_bin_vecs(filename):
-    '''
+    """
     TODO: Add ability to filter by word list
     Loads 300x1 word vecs from Google word2vec in .bin format
     Thanks to word2vec google groups for this script
     :param filename: string
     :return: dict, int
-    '''
+    """
     word_vecs = {}
     sys.stderr.write('Reading word2vec .bin file')
     cnt = 0
@@ -552,7 +574,7 @@ def load_bin_vecs(filename):
         header = fin.readline()
         vocab_size, layer1_size = map(int, header.split())
         binary_len = np.dtype('float32').itemsize * layer1_size
-        for line in xrange(vocab_size):
+        for line in range(vocab_size):
             word = []
             while True:
                 ch = fin.read(1)
@@ -568,25 +590,26 @@ def load_bin_vecs(filename):
     sys.stderr.write('\n')
     return word_vecs, layer1_size
 
+
 def load_pickled_vecs(filename, returnpp=False):
-    '''
+    """
     Load word vecs from word-paraphrase matrix
     :param filename: str
     :return: dict, list, dict
-    '''
+    """
     with open(filename, 'rb') as fin:
         word2ind, ordered_vocab, w2p = pickle.load(fin)
 
     word_vecs = {}
     N = len(word2ind.keys())
 
-    for w, d in w2p.iteritems():
-        lil_v = sparse.lil_matrix((1,N), dtype='float')
-        for p, sc in d.iteritems():
+    for w, d in w2p.items():
+        lil_v = sparse.lil_matrix((1, N), dtype='float')
+        for p, sc in d.items():
             try:
-                lil_v[0,word2ind[p]] = sc
+                lil_v[0, word2ind[p]] = sc
             except KeyError:
-                print 'Error loading vector:', w, p, sc
+                print('Error loading vector:', w, p, sc)
         word_vecs[w] = sparse.csr_matrix(lil_v)  # is this slow?
     if returnpp:
         return word_vecs, N, w2p
@@ -594,54 +617,57 @@ def load_pickled_vecs(filename, returnpp=False):
         return word_vecs, N
 
 
-def dict_cosine_dist(u,v):
+def dict_cosine_dist(u, v):
     features = list(set(u.keys()) | set(v.keys()))
     features.sort()
     uvec = np.array([u[f] if f in u else 0.0 for f in features])
     vvec = np.array([v[f] if f in v else 0.0 for f in features])
-    return cosine(uvec,vvec)
+    return cosine(uvec, vvec)
 
-def dict_js_divergence(u,v,normalize=True):
+
+def dict_js_divergence(u, v, normalize=True):
     features = list(set(u.keys()) | set(v.keys()))
     features.sort()
     uvec = np.array([u[f] if f in u else 0.0 for f in features])
     vvec = np.array([v[f] if f in v else 0.0 for f in features])
     if normalize:
-        uvec = uvec/sum(uvec)
-        vvec = vvec/sum(vvec)
-    return entropy.jensen_shannon_divergence(np.vstack([uvec,vvec]))
+        uvec = uvec / sum(uvec)
+        vvec = vvec / sum(vvec)
+    return entropy.jensen_shannon_divergence(np.vstack([uvec, vvec]))
 
 
-def try_americanize(w,st):
-    '''
+def try_americanize(w, st):
+    """
     Try to americanize the spelling of w to see if it can be found in set st
-    '''
-    if w.replace('isa','iza') in st:
-        return w.replace('isa','iza')
-    elif w.replace('ise','ize') in st:
-        return w.replace('ise','ize')
-    elif w.replace('ise','ice') in st:
-        return w.replace('ise','ice')
-    elif w.replace('our','or') in st:
-        return w.replace('our','or')
-    elif w.replace('re','er') in st:
-        return w.replace('re','er')
-    elif w.replace('nce','nse') in st:
-        return w.replace('nce','nse')
-    elif w.replace('yse','yze') in st:
-        return w.replace('yse','yze')
-    elif w.replace('mme','m') in st:
-        return w.replace('mme','m')
-    elif w.replace("'","") in st:
-        return w.replace("'","")
+    """
+    if w.replace('isa', 'iza') in st:
+        return w.replace('isa', 'iza')
+    elif w.replace('ise', 'ize') in st:
+        return w.replace('ise', 'ize')
+    elif w.replace('ise', 'ice') in st:
+        return w.replace('ise', 'ice')
+    elif w.replace('our', 'or') in st:
+        return w.replace('our', 'or')
+    elif w.replace('re', 'er') in st:
+        return w.replace('re', 'er')
+    elif w.replace('nce', 'nse') in st:
+        return w.replace('nce', 'nse')
+    elif w.replace('yse', 'yze') in st:
+        return w.replace('yse', 'yze')
+    elif w.replace('mme', 'm') in st:
+        return w.replace('mme', 'm')
+    elif w.replace("'", "") in st:
+        return w.replace("'", "")
     else:
         return None
+
 
 def flatten(l):
     return [item for sublist in l for item in sublist]
 
+
 def get_sims_matrix(method, scores, wordlist):
-    '''
+    """
     Return a similarity matrix.
 
     Can use one of four methods to calculate similarity matrix for words in
@@ -670,40 +696,47 @@ def get_sims_matrix(method, scores, wordlist):
     :param scores: dict
     :param wordlist: list of str
     :return: 2-dimensional np.ndarray of size len(wordlist) x len(wordlist)
-    '''
+    """
     if method == 'direct':
-        sims = np.array([[scores.get(i,{}).get(j,0.0) if i in scores else 0.0 for j in wordlist] for i in wordlist])
-    elif method == 'second_order_cosine': # cosine dist of word-PPDB2.0Score matrix
-        sims = np.array([[(1-dict_cosine_dist(scores.get(i,{}),scores.get(j,{}))) for j in wordlist] for i in wordlist])
-    elif method == 'second_order_JS': # JS divergence of word-PPDB2.0Score matrix
-        sims = np.array([[(1-dict_js_divergence(scores.get(i,{}),scores.get(j,{}))[0]) for j in wordlist] for i in wordlist])
+        sims = np.array([[scores.get(i, {}).get(j, 0.0) if i in scores else 0.0 for j in wordlist] for i in wordlist])
+    elif method == 'second_order_cosine':  # cosine dist of word-PPDB2.0Score matrix
+        sims = np.array(
+            [[(1 - dict_cosine_dist(scores.get(i, {}), scores.get(j, {}))) for j in wordlist] for i in wordlist])
+    elif method == 'second_order_JS':  # JS divergence of word-PPDB2.0Score matrix
+        sims = np.array(
+            [[(1 - dict_js_divergence(scores.get(i, {}), scores.get(j, {}))[0]) for j in wordlist] for i in wordlist])
     elif method == 'vec_cosine':
-        d = scores.values()[0].shape[0]
-        sims = np.array([[(1-cosine(scores.get(i,np.zeros(d)),scores.get(j,np.zeros(d)))) if i!=j else 1.0 for j in wordlist] for i in wordlist])
+        d = list(scores.values())[0].shape[0]
+        sims = np.array(
+            [[(1 - cosine(scores.get(i, np.zeros(d)), scores.get(j, np.zeros(d)))) if i != j else 1.0 for j in wordlist]
+             for i in wordlist])
     else:
         sys.stderr.write('Unknown sim method: %s' % method)
         return None
     sims = np.nan_to_num(sims)
     return sims
 
+
 def get_sils_matrix(method, scores, wordlist):
-    ''' See get_sims_matrix for definitions, which are the same here. The
+    """ See get_sims_matrix for definitions, which are the same here. The
     difference is that the resulting matrix contains distances instead of
     similarities.
 
     :return: 2-dimensional np.ndarray of size len(wordlist) x len(wordlist)
-    '''
-    if method =='direct':
+    """
+    if method == 'direct':
         sims = get_sims_matrix(method, scores, wordlist)
         sims = preprocessing.normalize(np.matrix(sims), norm='l2')
-        sils = 1-sims
-    elif method == 'dict_cosine': # cosine dist of word-PPDB2.0Score matrix
-        sils = np.array([[dict_cosine_dist(scores.get(i,{}),scores.get(j,{})) for j in wordlist] for i in wordlist])
-    elif method == 'dict_JS': # JS divergence of word-PPDB2.0Score matrix
-        sils = np.array([[dict_js_divergence(scores.get(i,{}),scores.get(j,{}))[0] for j in wordlist] for i in wordlist])
+        sils = 1 - sims
+    elif method == 'dict_cosine':  # cosine dist of word-PPDB2.0Score matrix
+        sils = np.array([[dict_cosine_dist(scores.get(i, {}), scores.get(j, {})) for j in wordlist] for i in wordlist])
+    elif method == 'dict_JS':  # JS divergence of word-PPDB2.0Score matrix
+        sils = np.array(
+            [[dict_js_divergence(scores.get(i, {}), scores.get(j, {}))[0] for j in wordlist] for i in wordlist])
     elif method == 'vec_cosine':
-        d = scores.values()[0].shape[0]
-        sils = np.array([[cosine(scores.get(i,np.zeros(d)), scores.get(j,np.zeros(d))) for j in wordlist] for i in wordlist])
+        d = list(scores.values())[0].shape[0]
+        sils = np.array(
+            [[cosine(scores.get(i, np.zeros(d)), scores.get(j, np.zeros(d))) for j in wordlist] for i in wordlist])
     else:
         sys.stderr.write('Unknown sil method: %s' % method)
         return None

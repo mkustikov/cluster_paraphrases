@@ -16,30 +16,34 @@ def score_semeval(resultskey, goldkey, output, semeval_root='../eval/semeval_uns
     :return:
     """
     ## Score F-Score
-    print(['java', '-jar', os.path.join(semeval_root, 'fscore.jar'), resultskey, goldkey, 'all'])
-    call(['java', '-jar', os.path.join(semeval_root, 'fscore.jar'), resultskey, goldkey, 'all'], stderr=STDOUT, stdout=output)
+    # print(['java', '-jar', os.path.join(semeval_root, 'fscore.jar'), resultskey, goldkey, 'all'])
+    call(['java', '-jar', os.path.join(semeval_root, 'fscore.jar'), resultskey, goldkey, 'all'], stderr=STDOUT,
+         stdout=output)
 
     ## Score V-Measure
-    print(['java', '-jar', os.path.join(semeval_root, 'vmeasure.jar'), resultskey, goldkey, 'all'])
-    call(['java', '-jar', os.path.join(semeval_root, 'vmeasure.jar'), resultskey, goldkey, 'all'], stderr=STDOUT, stdout=output)
+    # print(['java', '-jar', os.path.join(semeval_root, 'vmeasure.jar'), resultskey, goldkey, 'all'])
+    call(['java', '-jar', os.path.join(semeval_root, 'vmeasure.jar'), resultskey, goldkey, 'all'], stderr=STDOUT,
+         stdout=output)
 
     return
 
 
 def write_key(keyfile, tgt, sol, mode='w'):
     with open(keyfile, mode) as fout:
-        for i, l in sol.iteritems():
+        for i, l in sol.items():
             for pp in l:
-                print >> fout, ' '.join([tgt, tgt+'.'+pp, tgt+'.'+str(i)])
+                fout.write(' '.join([tgt, tgt + '.' + pp, tgt + '.' + str(i)]))
+                fout.write('\n')
+    fout.close()
 
 
 def read_scoring_soln(tempfile, tgt):
-    '''
+    """
     Return scores for target written in tempfile
     :param tempfile: str
     :param tgt:
     :return: fscore, prec, rec, vmeas, hom, comp (all float)
-    '''
+    """
     fscore = 0.0
     prec = 0.0
     rec = 0.0
@@ -70,32 +74,35 @@ def get_labels(gold, sol):
     goldlab = []
     sollab = []
     words = []
+
     def get_assgn(wrd, sl):
-        return sorted([k for k,v in sl.iteritems() if wrd in v])
+        return sorted([k for k, v in sl.items() if wrd in v])
+
     for w in allwords:
         gldassgn = get_assgn(w, gold)
         solassgn = get_assgn(w, sol)
         if len(gldassgn) == len(solassgn):
             goldlab.extend(gldassgn)
             sollab.extend(solassgn)
-            words.extend([w]*len(gldassgn))
+            words.extend([w] * len(gldassgn))
         elif len(gldassgn) > len(solassgn):
             extralen = len(gldassgn) - len(solassgn)
             goldlab.extend(gldassgn)
-            solassgn = solassgn + [solassgn[-1]]*extralen
+            solassgn = solassgn + [solassgn[-1]] * extralen
             sollab.extend(solassgn)
             words.extend([w] * len(gldassgn))
         elif len(solassgn) > len(gldassgn):
             extralen = len(solassgn) - len(gldassgn)
             sollab.extend(solassgn)
-            gldassgn = gldassgn + [gldassgn[-1]]*extralen
+            gldassgn = gldassgn + [gldassgn[-1]] * extralen
             goldlab.extend(gldassgn)
             words.extend([w] * len(solassgn))
 
     return goldlab, sollab, words
 
 
-def score_clustering_solution(tgt, sol, gold, tempdir='eval/semeval_unsup_eval/keys', use_sklearn_vmeas=False, semeval_root='eval/semeval_unsup_eval'):
+def score_clustering_solution(tgt, sol, gold, tempdir='../eval/semeval_unsup_eval/keys', use_sklearn_vmeas=False,
+                              semeval_root='../eval/semeval_unsup_eval'):
     '''
     Score clustering solution sol against gold classes.
     Both the sol and gold are passed as dictionaries with integer keys (value
@@ -137,24 +144,25 @@ def score_clustering_solution(tgt, sol, gold, tempdir='eval/semeval_unsup_eval/k
 
     return fscore, prec, rec, vmeas, hom, comp
 
+
 def score_clustering_batch(solppsets, goldppsets, outfile='results', tempdir='../eval/semeval_unsup_eval/keys'):
-    '''
+    """
     Score multiple clustering solutions contained in solppsets against goldppsets
     :param solppsets: dict {word_type -> ParaphraseSet}
     :param goldppsets: dict {word_type -> ParaphraseSet}
     :param tempdir:str
     :return:
-    '''
+    """
     ## Write temporary key file
     tempsolkey = os.path.join(tempdir, 'sol.key')
     tempgoldkey = os.path.join(tempdir, 'gld.key')
-    for wt, ppset in solppsets.iteritems():
+    for wt, ppset in solppsets.items():
         tgtname = '_'.join([wt.word, wt.type])
         sol = ppset.sense_clustering
         gld = goldppsets[wt].sense_clustering
 
         tgtset = set([item for sublist in sol.values() for item in sublist])
-        gldfilt = defaultdict(set,{n: l & tgtset for n,l in gld.iteritems()})
+        gldfilt = defaultdict(set, {n: l & tgtset for n, l in gld.items()})
 
         write_key(tempsolkey, tgtname, sol, mode='a')
         write_key(tempgoldkey, tgtname, gldfilt, mode='a')
@@ -167,4 +175,3 @@ def score_clustering_batch(solppsets, goldppsets, outfile='results', tempdir='..
     ## Delete temporary key files
     # os.remove(tempsolkey)
     # os.remove(tempgoldkey)
-
